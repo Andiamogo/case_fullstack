@@ -3,3 +3,8 @@ duckdb>=0.9.0
 plotly>=5.0.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
+
+# FastAPI backend
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6

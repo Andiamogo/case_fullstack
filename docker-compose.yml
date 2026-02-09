@@ -1,10 +1,17 @@
 services:
-  agent:
+  api:
     build: .
-    stdin_open: true
-    tty: true
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
       - ./output:/app/output
+
+  web:
+    build: ./web
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
