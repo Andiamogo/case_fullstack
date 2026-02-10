@@ -1,9 +1,17 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { ChatMessage } from "../types/events";
-import { parseSSEStream } from "../utils/sseParser";
+import type { ChatMessage, SSEEventType } from "../types/events";
 import { createEventHandler } from "../utils/eventMapper";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+const SSE_EVENT_TYPES: SSEEventType[] = [
+  "thinking_delta",
+  "text_delta",
+  "tool_call",
+  "tool_result",
+  "data_table",
+  "visualization",
+];
 
 interface UseSSEChatOptions {
   onMessage?: (message: ChatMessage) => void;
@@ -30,7 +38,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
 
   const addMessage = useCallback(
@@ -57,9 +65,9 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   );
 
   const stopStream = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
     setIsStreaming(false);
   }, []);
@@ -73,7 +81,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   }, [stopStream, eventHandler]);
 
   const sendMessage = useCallback(
-    async (question: string) => {
+    (question: string) => {
       if (isStreaming) return;
 
       setError(null);
@@ -92,45 +100,46 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
 
       setIsStreaming(true);
 
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+      const params = new URLSearchParams({ question });
+      if (sessionIdRef.current) {
+        params.set("session_id", sessionIdRef.current);
+      }
 
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, session_id: sessionIdRef.current }),
-          signal: abortController.signal,
-        });
+      const es = new EventSource(`${API_BASE_URL}/api/chat/stream?${params}`);
+      eventSourceRef.current = es;
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("No response body");
-        }
-
-        await parseSSEStream(reader, (eventType, data) => {
-          if (eventType === "error") {
-            const errorMsg = eventHandler.handleError(data);
-            setError(errorMsg);
-            onError?.(errorMsg);
-          } else if (eventType !== "done") {
+      for (const eventType of SSE_EVENT_TYPES) {
+        es.addEventListener(eventType, (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
             eventHandler.handleEvent(eventType, data);
+          } catch {
+            // Ignore parse errors
           }
         });
-      } catch (err) {
-        if ((err as Error).name === "AbortError") return;
-        const errorMsg = (err as Error).message || "Connection error";
-        setError(errorMsg);
-        onError?.(errorMsg);
-      } finally {
-        abortControllerRef.current = null;
+      }
+
+      es.addEventListener("error", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          const errorMsg = eventHandler.handleError(data);
+          setError(errorMsg);
+          onError?.(errorMsg);
+        } catch {
+          // Native EventSource error (connection lost, etc.)
+        }
+        es.close();
+        eventSourceRef.current = null;
         setIsStreaming(false);
         eventHandler.reset();
-      }
+      });
+
+      es.addEventListener("done", () => {
+        es.close();
+        eventSourceRef.current = null;
+        setIsStreaming(false);
+        eventHandler.reset();
+      });
     },
     [isStreaming, addMessage, eventHandler, onError]
   );
