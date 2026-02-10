@@ -49,19 +49,3 @@ async def get_file(filename: str) -> FileResponse:
     )
 
 
-@router.get("")
-async def list_files() -> dict[str, list[dict]]:
-    """List all generated files in the output directory."""
-    if not OUTPUT_DIR.exists():
-        return {"files": []}
-
-    files = []
-    for file_path in OUTPUT_DIR.iterdir():
-        if file_path.is_file():
-            files.append({
-                "name": file_path.name,
-                "size": file_path.stat().st_size,
-                "url": f"/api/files/{file_path.name}",
-            })
-
-    return {"files": sorted(files, key=lambda f: f["name"])}

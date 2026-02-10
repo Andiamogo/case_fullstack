@@ -72,18 +72,3 @@ async def root() -> dict[str, str]:
     return {"status": "ok", "service": "data-analysis-agent"}
 
 
-@app.get("/api/datasets")
-async def list_datasets() -> dict[str, list[dict]]:
-    """List available datasets with their schemas."""
-    datasets = []
-    for name, df in session_manager.datasets.items():
-        datasets.append({
-            "name": name,
-            "rows": df.shape[0],
-            "columns": df.shape[1],
-            "schema": [
-                {"name": col, "dtype": str(df[col].dtype)}
-                for col in df.columns
-            ],
-        })
-    return {"datasets": datasets}
